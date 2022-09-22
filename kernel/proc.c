@@ -225,6 +225,9 @@ userinit(void)
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
 
+  // initial tracenum
+  p->tracenum = 0;
+
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
 
@@ -251,6 +254,19 @@ growproc(int n)
   }
   p->sz = sz;
   return 0;
+}
+
+// Get current number of active processes.
+int
+getpronum(void)
+{
+  int num = 0;
+  for (int i = 0; i < nextpid; ++i){
+    if (proc[i].state != UNUSED){
+      ++num;
+    }
+  }
+  return num;
 }
 
 // Create a new process, copying the parent.
@@ -282,6 +298,9 @@ fork(void)
 
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
+
+  // copy tracenum.
+  np->tracenum = p->tracenum;
 
   // increment reference counts on open file descriptors.
   for(i = 0; i < NOFILE; i++)
