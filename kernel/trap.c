@@ -23,6 +23,7 @@ trapinit(void)
 }
 
 // set up to take exceptions and traps while in the kernel.
+// note: in the kernel!
 void
 trapinithart(void)
 {
@@ -77,8 +78,30 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2){
     yield();
+    p->ticknum++;
+    if (p->interval > 0 && p->ticknum >= p->interval && p->retflag == 1){
+      // set the return address as pointer of handler
+      if (p->handlerfunc >= 0){
+        p->userepc = p->trapframe->epc;
+        p->a0 = p->trapframe->a0;
+        p->a1 = p->trapframe->a1;
+        p->a2 = p->trapframe->a2;
+        p->a3 = p->trapframe->a3;
+        p->a4 = p->trapframe->a4;
+        p->a5 = p->trapframe->a5;
+        p->a6 = p->trapframe->a6;
+        p->ra = p->trapframe->ra;
+        p->sp = p->trapframe->sp;
+        p->s0 = p->trapframe->s0;
+        p->s1 = p->trapframe->s1;
+        p->retflag = 0;
+        p->trapframe->epc = p->handlerfunc;
+      }
+      p->ticknum -= p->interval;
+    }
+  }
 
   usertrapret();
 }
