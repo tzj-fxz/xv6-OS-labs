@@ -1,0 +1,5 @@
+thread 0: put 1
+thread 1: put 6
+两个线程同时进入insert，在创建完新的entry后，线程0改变*p，尚未退出，
+切换到线程1，由于1和6处于同一个table中，所以刚刚被线程0改变的*p立即被改变为线程1新建的entry
+这将导致线程0刚创建的entry未被放入table中，导致key丢失
