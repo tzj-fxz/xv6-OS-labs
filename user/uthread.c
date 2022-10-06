@@ -93,7 +93,7 @@ thread_create(void (*func)())
   t->state = RUNNABLE;
   // YOUR CODE HERE
   t->ra = (uint64)func;
-  t->sp = (uint64)&t->stack[STACK_SIZE]; // stack grow upside down
+  t->sp = (uint64)&t->stack[STACK_SIZE - 1]; // stack grow upside down
 }
 
 void 
