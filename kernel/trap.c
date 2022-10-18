@@ -10,6 +10,7 @@ struct spinlock tickslock;
 uint ticks;
 
 extern char trampoline[], uservec[], userret[];
+extern pte_t* walk(pagetable_t, uint64, int);
 
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
@@ -65,6 +66,47 @@ usertrap(void)
     intr_on();
 
     syscall();
+
+  } else if (r_scause() == 15){
+
+    // page fault when write
+    pte_t *old_pte;
+    uint64 pgft_va = r_stval();
+    uint64 pgft_pa;
+
+    // get old pte and pa
+    if (old_pte = walk(p->pagetable, pgft_va, 0) == 0){
+      printf("usertrap(): cannot find pte\n");
+      p->killed = 1;
+      exit(-1);
+    }
+    if ((*old_pte) & PTE_COW == 0){
+      printf("usertrap(): pte is not cow\n");
+      p->killed = 1;
+      exit(-1);
+    }
+    if (((*old_pte) & PTE_U == 0) || ((*old_pte) & PTE_V == 0)){
+      printf("usertrap(): page is invalid or unaccessible\n");
+      p->killed = 1;
+      exit(-1);
+    }
+    pgft_pa = PTE2PA(*old_pte);
+
+    // alloc and copy
+    char *mem;
+    if ((mem = kalloc()) == 0)
+      p->killed = 1;
+    memmove(mem, (char*)pgft_pa, PGSIZE);
+
+    // create pte
+    if (mappages(p->pagetable, pgft_va, PGSIZE, (uint64)mem, (PTE_FLAGS(*old_pte) & (~PTE_COW)) | PTE_W) != 0){
+      kfree(mem);
+      printf("usertrap(): create pte error when cow\n");
+      p->killed = 1;
+      exit(-1);
+    }
+    kfree((void*)pgft_pa);
+    
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {

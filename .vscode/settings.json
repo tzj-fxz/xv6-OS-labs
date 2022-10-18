@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "Makefile": "makefile",
+        "cmath": "c",
+        "*.tcc": "c"
+    }
+}
