@@ -25,6 +25,31 @@ struct {
   uint32 *refcnt; // record ref cnt of each page
 } kmem;
 
+int get_ref_cnt_index(void *pa)
+{
+  return ((char *)pa - (char *)PGROUNDUP((uint64)end)) >> 12;
+}
+
+void acquire_refcntlock()
+{
+  acquire(&kmem.refcntlock);
+}
+
+void release_refcntlock()
+{
+  release(&kmem.refcntlock);
+}
+
+void add_refcnt(void *pa)
+{
+  ++kmem.refcnt[get_ref_cnt_index(pa)];
+}
+
+uint32 get_refcnt(void *pa)
+{
+  return kmem.refcnt[get_ref_cnt_index(pa)];
+}
+
 void
 kinit()
 {
@@ -36,12 +61,7 @@ kinit()
   uint64 refcnt_pages = ((refcnt_pages_cnt * sizeof(uint32)) >> 12) + 1;
 
   kmem.refcnt = (uint32*)end;
-  freerange(end + (refcnt_pages << 12), (void*)PHYSTOP);
-}
-
-inline int get_ref_cnt_index(void *pa)
-{
-  return ((char *)pa - (char *)PGROUNDUP((uint64)end)) >> 12;
+  freerange(end + (uint64)(refcnt_pages << 12), (void*)PHYSTOP);
 }
 
 void
@@ -70,12 +90,12 @@ kfree(void *pa)
     panic("kfree");
 
   // only free when refcnt = 0
-  acquire(&kmem.lock);
+  acquire(&kmem.refcntlock);
   if (--kmem.refcnt[get_ref_cnt_index(pa)]){
-    release(&kmem.lock);
+    release(&kmem.refcntlock);
     return;
   }
-  release(&kmem.lock);
+  release(&kmem.refcntlock);
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);

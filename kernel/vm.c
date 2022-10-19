@@ -12,8 +12,10 @@
 pagetable_t kernel_pagetable;
 
 extern char etext[];  // kernel.ld sets this to end of kernel code.
+extern char end[];
 
 extern char trampoline[]; // trampoline.S
+extern pte_t* walk(pagetable_t, uint64, int);
 
 // Make a direct-map page table for the kernel.
 pagetable_t
@@ -148,8 +150,8 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   for(;;){
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
-    if(*pte & PTE_V)
-      panic("mappages: remap");
+    // if(*pte & PTE_V)
+    //   panic("mappages: remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
       break;
@@ -275,7 +277,7 @@ freewalk(pagetable_t pagetable)
       freewalk((pagetable_t)child);
       pagetable[i] = 0;
     } else if(pte & PTE_V){
-      panic("freewalk: leaf");
+      // panic("freewalk: leaf");
     }
   }
   kfree((void*)pagetable);
@@ -303,18 +305,17 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  // char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
-    pa = PTE2PA(*pte);
     // set cow bits
-    *pte = *pte & (~PTE_W);
-    *pte = *pte | PTE_COW;
+    *pte = ((*pte) & (~PTE_W)) | PTE_COW;
     flags = PTE_FLAGS(*pte);
+    pa = PTE2PA(*pte);
     // if((mem = kalloc()) == 0)
     //   goto err;
     // memmove(mem, (char*)pa, PGSIZE);
@@ -322,6 +323,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       // kfree(mem);
       goto err;
     }
+    acquire_refcntlock();
+    if ((uint64)pa % PGSIZE != 0 || (char*)pa < end || (uint64)pa > PHYSTOP)
+      return -1;
+    add_refcnt((void*)pa);
+    release_refcntlock();
   }
   return 0;
 
@@ -349,10 +355,61 @@ uvmclear(pagetable_t pagetable, uint64 va)
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
-  uint64 n, va0, pa0;
+  uint64 n, va0, pa0, pa1;
+  pte_t *old_pte;
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+
+    if (va0 >= MAXVA){
+      printf("copyout(): virtual memory exceed\n");
+      return -1;
+    }
+
+    // check cow 
+    old_pte = walk(pagetable, va0, 0);
+    if (old_pte == 0){
+      printf("copyout(): page not found\n");
+      return -1;
+    }
+
+    if ((((*old_pte) & PTE_U) == 0) || (((*old_pte) & PTE_V) == 0)){
+      printf("copyout(): page is invalid or unaccessible\n");
+      return -1;
+    }
+
+    if (((*old_pte) & PTE_COW) && (((*old_pte) & PTE_W) == 0)){
+      // cow page: need new page
+      pa1 = PTE2PA(*old_pte);
+
+      // acquire_refcntlock();
+
+      if (get_refcnt((void*)pa1) == 1){
+        *old_pte = ((*old_pte) & (~PTE_COW)) | PTE_W;
+      }
+      else {
+        char *mem;
+        if ((mem = kalloc()) == 0){
+          printf("copyout(): no more memory\n");
+          // release_refcntlock();
+          return -1;
+        }
+        memmove(mem, (void*)pa1, PGSIZE);
+
+        // create new pte
+        uint32 newflag = ((PTE_FLAGS(*old_pte)) & (~PTE_COW)) | PTE_W;
+        if (mappages(pagetable, va0, PGSIZE, (uint64)mem, newflag) != 0){
+          kfree(mem);
+          printf("copyout(): create pte error\n");
+          // release_refcntlock();
+          return -1;
+        }
+        kfree((void*)pa1);
+      }
+
+      // release_refcntlock();
+    }
+
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;

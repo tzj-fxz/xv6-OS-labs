@@ -70,43 +70,65 @@ usertrap(void)
   } else if (r_scause() == 15){
 
     // page fault when write
+    uint64 pgft_va = PGROUNDDOWN(r_stval());
     pte_t *old_pte;
-    uint64 pgft_va = r_stval();
-    uint64 pgft_pa;
 
-    // get old pte and pa
-    if (old_pte = walk(p->pagetable, pgft_va, 0) == 0){
-      printf("usertrap(): cannot find pte\n");
+    if (pgft_va >= MAXVA || pgft_va > p->sz){
+      printf("usertrap(): virtual memory exceed\n");
       p->killed = 1;
       exit(-1);
     }
-    if ((*old_pte) & PTE_COW == 0){
+
+    // get old pte and pa
+    old_pte = walk(p->pagetable, pgft_va, 0);
+    if (old_pte == 0){
+      printf("usertrap(): page not found\n");
+      p->killed = 1;
+      exit(-1);
+    }
+    if (((*old_pte) & PTE_COW) == 0){
       printf("usertrap(): pte is not cow\n");
       p->killed = 1;
       exit(-1);
     }
-    if (((*old_pte) & PTE_U == 0) || ((*old_pte) & PTE_V == 0)){
+    if ((((*old_pte) & PTE_U) == 0) || (((*old_pte) & PTE_V) == 0)){
       printf("usertrap(): page is invalid or unaccessible\n");
       p->killed = 1;
       exit(-1);
     }
-    pgft_pa = PTE2PA(*old_pte);
+    uint64 pgft_pa = PTE2PA(*old_pte);
 
     // alloc and copy
-    char *mem;
-    if ((mem = kalloc()) == 0)
-      p->killed = 1;
-    memmove(mem, (char*)pgft_pa, PGSIZE);
+    if ((*old_pte) & PTE_COW){
+      // acquire_refcntlock();
 
-    // create pte
-    if (mappages(p->pagetable, pgft_va, PGSIZE, (uint64)mem, (PTE_FLAGS(*old_pte) & (~PTE_COW)) | PTE_W) != 0){
-      kfree(mem);
-      printf("usertrap(): create pte error when cow\n");
-      p->killed = 1;
-      exit(-1);
+      if (get_refcnt((void*)pgft_pa) == 1){
+        *old_pte = ((*old_pte) & (~PTE_COW)) | PTE_W;
+      }
+      else {
+        char *mem;
+        if ((mem = kalloc()) == 0){
+          printf("usertrap(): no more memory\n");
+          p->killed = 1;
+          // release_refcntlock();
+          exit(-1);
+        }
+        memmove(mem, (char*)pgft_pa, PGSIZE);
+
+        // create pte
+        uint32 newflag = ((PTE_FLAGS(*old_pte)) & (~PTE_COW)) | PTE_W;
+        if (mappages(p->pagetable, pgft_va, PGSIZE, (uint64)mem, newflag) != 0){
+          kfree(mem);
+          printf("usertrap(): create pte error when cow\n");
+          p->killed = 1;
+          // release_refcntlock();
+          exit(-1);
+        }
+        kfree((void*)pgft_pa);
+      }
+      
+      // release_refcntlock();
     }
-    kfree((void*)pgft_pa);
-    
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {

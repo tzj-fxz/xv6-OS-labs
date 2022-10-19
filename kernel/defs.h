@@ -63,6 +63,10 @@ void            ramdiskrw(struct buf*);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
+void            acquire_refcntlock();
+void            release_refcntlock();
+void            add_refcnt(void *);
+uint32          get_refcnt(void *);
 
 // log.c
 void            initlog(int, struct superblock*);
