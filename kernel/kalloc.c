@@ -45,6 +45,16 @@ void add_refcnt(void *pa)
   ++kmem.refcnt[get_ref_cnt_index(pa)];
 }
 
+void acquire_kmemlock()
+{
+  acquire(&kmem.lock);
+}
+
+void release_kmemlock()
+{
+  release(&kmem.lock);
+}
+
 uint32 get_refcnt(void *pa)
 {
   return kmem.refcnt[get_ref_cnt_index(pa)];
@@ -90,12 +100,15 @@ kfree(void *pa)
     panic("kfree");
 
   // only free when refcnt = 0
-  acquire(&kmem.refcntlock);
+  // acquire(&kmem.refcntlock);
+  acquire(&kmem.lock);
   if (--kmem.refcnt[get_ref_cnt_index(pa)]){
-    release(&kmem.refcntlock);
+    // release(&kmem.refcntlock);
+    release(&kmem.lock);
     return;
   }
-  release(&kmem.refcntlock);
+  // release(&kmem.refcntlock);
+  release(&kmem.lock);
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);

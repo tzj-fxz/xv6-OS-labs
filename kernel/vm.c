@@ -323,11 +323,13 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       // kfree(mem);
       goto err;
     }
-    acquire_refcntlock();
+    // acquire_refcntlock();
+    acquire_kmemlock();
     if ((uint64)pa % PGSIZE != 0 || (char*)pa < end || (uint64)pa > PHYSTOP)
       return -1;
     add_refcnt((void*)pa);
-    release_refcntlock();
+    // release_refcntlock();
+    release_kmemlock();
   }
   return 0;
 

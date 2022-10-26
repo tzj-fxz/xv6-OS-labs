@@ -67,6 +67,8 @@ void            acquire_refcntlock();
 void            release_refcntlock();
 void            add_refcnt(void *);
 uint32          get_refcnt(void *);
+void            acquire_kmemlock();
+void            release_kmemlock();
 
 // log.c
 void            initlog(int, struct superblock*);
