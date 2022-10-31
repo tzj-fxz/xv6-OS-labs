@@ -242,7 +242,7 @@ pgaccess(uint64 startva, int pagenum, uint64 userbufferaddr)
   char *buffer;
   if ((buffer = (char *)kalloc()) == 0)
     panic("pgaccess: buffer alloc");
-  memset(buffer, 0, PGSIZE/(sizeof(char)*8));
+  memset(buffer, 0, PGSIZE/(sizeof(char)));
 
   startva = PGROUNDDOWN(startva);
   for (int i = 0; i < pagenum; ++i){
