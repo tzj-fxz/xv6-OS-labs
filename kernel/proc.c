@@ -257,7 +257,7 @@ pgaccess(uint64 startva, int pagenum, uint64 userbufferaddr)
     }
   }
 
-  if (copyout(pagetable, userbufferaddr, buffer, pagenum/sizeof(char)+1) != 0)
+  if (copyout(pagetable, userbufferaddr, buffer, pagenum/8+1) != 0)
     panic("pgaccess: copyout");
 
   kfree(buffer);
