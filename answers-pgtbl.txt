@@ -1,0 +1,8 @@
+Speed up system calls
+sys_read, sys_fstat (only read is OK)
+
+Print a page table
+page 0: text
+page 2: junk (guard)
+Yes, page 1 is data page
+third to last page: USYSCALL !!!

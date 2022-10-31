@@ -81,6 +81,18 @@ int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
+
+  uint64 startva;
+  if (argaddr(0, &startva) < 0)
+    return -1;
+  int pagenum;
+  if (argint(1, &pagenum) < 0)
+    return -1;
+  uint64 userbufferaddr;
+  if (argaddr(2, &userbufferaddr) < 0)
+    return -1;
+  pgaccess(startva, pagenum, userbufferaddr);
+
   return 0;
 }
 #endif
