@@ -102,8 +102,9 @@ kalloc(void)
       }
     }
   }
-  if(r)
+  else{
     kmem.freelist[cpu_id] = r->next;
+  }
   release(&kmem.lock[cpu_id]);
 
   if(r)
