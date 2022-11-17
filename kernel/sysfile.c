@@ -165,6 +165,53 @@ bad:
   return -1;
 }
 
+// Create soft link
+uint64
+sys_symlink(void)
+{
+  char target[MAXPATH], path[MAXPATH], name[DIRSIZ];
+  struct inode *dp, *tarip;
+
+  if (argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+  
+  begin_op();
+  // find path's directory's inode
+  if ((dp = nameiparent(path, name)) == 0){
+    end_op();
+    return -1;
+  }
+
+  // allocate a SYMLINK inode with target as the link file
+  tarip = ialloc(dp->dev, T_SYMLINK);
+  ilock(tarip);
+  if (writei(tarip, 0, (uint64)target, 0, sizeof(target)) < sizeof(target)){
+    iunlockput(tarip);
+    iput(dp);
+    end_op();
+    return -1;
+  }
+
+  ilock(dp);
+  // create soft link between path and target
+  if (dirlink(dp, name, tarip->inum) < 0){
+    iunlockput(dp);
+    iunlockput(tarip);
+    end_op();
+    return -1;
+  }
+  
+  iunlockput(dp);
+  // increase target.nlink
+  tarip->nlink++;
+  iupdate(tarip);
+  iunlockput(tarip);
+
+  end_op();
+
+  return 0;
+}
+
 // Is the directory dp empty except for "." and ".." ?
 static int
 isdirempty(struct inode *dp)
@@ -283,6 +330,27 @@ create(char *path, short type, short major, short minor)
   return ip;
 }
 
+int
+recur(struct inode *source, struct inode **ip)
+{
+  struct inode *sources = source;
+  int depth = 0;
+  while (depth < 10 && sources->type == T_SYMLINK){
+    char target[MAXPATH] = {0};
+    readi(sources, 0, (uint64)target, 0, MAXPATH);
+    iunlockput(sources);
+    if ((sources = namei(target)) == 0){
+      return -1;
+    }
+    depth++;
+    ilock(sources);
+  }
+  if (depth >= 10)
+    return -1;
+  *ip = sources;
+  return 0;
+}
+
 uint64
 sys_open(void)
 {
@@ -313,6 +381,14 @@ sys_open(void)
       iunlockput(ip);
       end_op();
       return -1;
+    }
+    if (ip->type == T_SYMLINK && ((omode & O_NOFOLLOW) == 0)){
+      // recursively search
+      struct inode *ip_copy = ip;
+      if (recur(ip_copy, &ip) < 0){
+        end_op();
+        return -1;
+      }
     }
   }
 
