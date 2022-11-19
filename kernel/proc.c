@@ -5,6 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
+#include "fs.h"
+#include "sleeplock.h"
+#include "file.h"
 
 struct cpu cpus[NCPU];
 
@@ -140,6 +144,13 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+
+  // set mmaped pages number
+  p->vma_element_num = 0;
+  for (int i = 0; i < 16; ++i){
+    p->vma[i].valid = 1;
+  }
+  p->max_vma = PGROUNDDOWN(MAXVA - PGSIZE * 2);
 
   return p;
 }
@@ -315,6 +326,15 @@ fork(void)
   np->state = RUNNABLE;
   release(&np->lock);
 
+  // copy mmaped info
+  np->max_vma = p->max_vma;
+  np->vma_element_num = p->vma_element_num;
+  for (int i = 0; i < 16; ++i){
+    if (p->vma[i].f)
+      p->vma[i].f = filedup(p->vma[i].f);
+    np->vma[i] = p->vma[i];
+  }
+
   return pid;
 }
 
@@ -352,6 +372,26 @@ exit(int status)
       p->ofile[fd] = 0;
     }
   }
+
+  for (int i = 15; i >= 0; --i){
+    if (p->vma[i].valid == 1)
+      continue;
+    int length = p->vma[i].vm_end - p->vma[i].vm_start;
+    if (walkaddr(p->pagetable, p->vma[i].vm_start)){
+      if ((p->vma[i].flags & MAP_SHARED) && (p->vma[i].f->writable)){
+        if (filewrite(p->vma[i].f, p->vma[i].vm_start, length) < 0){
+          printf("filewrite error\n");
+        }
+      }
+      uvmunmap(p->pagetable, p->vma[i].vm_start, length / PGSIZE, 1);
+    }
+    p->vma[i].vm_start += length;
+    if (p->vma[i].vm_start == p->vma[i].vm_end){
+      p->vma[i].f = fileundup(p->vma[i].f);
+      p->vma[i].valid = 1;
+    }
+  }
+  p->max_vma = MAXVA - PGSIZE * 2;
 
   begin_op();
   iput(p->cwd);

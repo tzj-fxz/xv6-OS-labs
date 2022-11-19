@@ -18,7 +18,7 @@
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
-static int
+int
 argfd(int n, int *pfd, struct file **pf)
 {
   int fd;
@@ -483,4 +483,102 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+// mmap syscall
+uint64
+sys_mmap(void)
+{
+  uint64 addr;
+  int length, prot, flags, fd, offset;
+  struct file* f;
+  if (argaddr(0, &addr) < 0 || argint(1, &length) < 0 || argint(2, &prot) < 0)
+    return -1;
+  if (argint(3, &flags) < 0 || argfd(4, &fd, &f) || argint(5, &offset) < 0)
+    return -1;
+
+  // write not permitted
+  if (!f->writable && (prot & PROT_WRITE) && (flags & MAP_SHARED))
+    return -1;
+
+  struct proc *p = myproc();
+  struct VMA* select_vma = 0;
+  for (int i = 0; i < 16; ++i){
+    if (p->vma[i].valid){
+      select_vma = &p->vma[i];
+      p->vma_element_num = i;
+      break;
+    }
+  }
+
+  if (select_vma){
+    select_vma->valid = 0;
+    select_vma->vm_end = (uint64)(PGROUNDDOWN(p->max_vma));
+    select_vma->vm_start = (uint64)(PGROUNDDOWN(p->max_vma - length));
+    p->max_vma = select_vma->vm_start;
+    // warn: prot not match with pte
+    select_vma->prot = (prot << 1);
+    select_vma->flags = flags;
+    select_vma->fd = fd;
+    select_vma->f = filedup(f);
+    return select_vma->vm_start;
+  }
+  
+  return -1;
+}
+
+// munmap syscall
+uint64
+sys_munmap(void)
+{
+  uint64 addr;
+  int length;
+  if (argaddr(0, &addr) < 0 || argint(1, &length) < 0)
+    return -1;
+  length = PGSIZE * (length / PGSIZE + (length % PGSIZE != 0));
+
+  struct proc *p = myproc();
+  struct VMA *select_vma = 0;
+  for (int i = 0; i < 16; ++i){
+    if (addr >= p->vma[i].vm_start && addr < p->vma[i].vm_end){
+      select_vma = &p->vma[i];
+      break;
+    }
+  }
+  if (select_vma){
+    if (walkaddr(p->pagetable, select_vma->vm_start)){
+      if ((select_vma->flags & MAP_SHARED) && (select_vma->f->writable)){
+        // write back
+        if (filewrite(select_vma->f, select_vma->vm_start, length) < 0){
+          printf("unmap: filewrite error\n");
+          return -1;
+        }
+      }
+      uvmunmap(p->pagetable, select_vma->vm_start, length / PGSIZE, 1);
+    }
+    select_vma->vm_start += length;
+
+    if (select_vma->vm_start == select_vma->vm_end){
+      // all pages unmap
+      select_vma->f = fileundup(select_vma->f);
+      select_vma->valid = 1;
+    }
+
+    // modify max_vma
+    int j;
+    for (j = p->vma_element_num; j >= 0; --j){
+      if (p->vma[j].valid == 0){
+        p->vma_element_num = j;
+        p->max_vma = p->vma[j].vm_start;
+        break;
+      }
+    }
+    if (j < 0){
+      p->max_vma = MAXVA - PGSIZE * 2;
+      p->vma_element_num = 0;
+    }
+    return 0;
+  }
+
+  return -1;
 }

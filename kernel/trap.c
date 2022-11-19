@@ -5,6 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fs.h"
+#include "sleeplock.h"
+#include "file.h"
+#include "fcntl.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -50,7 +54,46 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  if (r_scause() == 13 || r_scause() == 15){
+    // page fault
+    struct proc* p = myproc();
+    uint64 va = PGROUNDDOWN(r_stval());
+    // find relative vma
+    struct VMA *rel_vma = 0;
+    for (int i = 0; i < 16; ++i){
+      if (va >= p->vma[i].vm_start && va < p->vma[i].vm_end){
+        rel_vma = &p->vma[i];
+        break;
+      }
+    }
+    if (rel_vma == 0){
+      printf("usertrap(): mmaped page not found\n");
+      p->killed = 1;
+      goto end;
+    }
+
+    // allocate a free page
+    char *mmapmem = (char *)kalloc();
+    if (mmapmem == 0){
+      printf("usertrap(): no free memory\n");
+      p->killed = 1;
+      goto end;
+    }
+    memset(mmapmem, 0, PGSIZE);
+    // printf("map: %p, %p\n", rel_vma->vm_start, rel_vma->vm_end);
+    if (mappages(p->pagetable, va, PGSIZE, (uint64)mmapmem, rel_vma->prot|PTE_U|PTE_V) < 0){
+      printf("usertrap(): mappages fault\n");
+      kfree(mmapmem);
+      p->killed = 1;
+      goto end;
+    }
+
+    ilock(rel_vma->f->ip);
+    readi(rel_vma->f->ip, 1, va, va - rel_vma->vm_start, PGSIZE);
+    iunlock(rel_vma->f->ip);
+
+  }
+  else if(r_scause() == 8){
     // system call
 
     if(p->killed)
@@ -73,6 +116,7 @@ usertrap(void)
     p->killed = 1;
   }
 
+end:
   if(p->killed)
     exit(-1);
 
